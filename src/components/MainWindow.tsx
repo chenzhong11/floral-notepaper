@@ -1,3 +1,4 @@
+import { useTaskPreviewUndo } from "../features/markdown/useTaskPreviewUndo";
 import { insertTask, continueTask } from "../features/markdown/taskEditing";
 import {
   useCallback,
@@ -912,12 +913,12 @@ export function MainWindow({
           if (!currentId) return;
           const stillExists = loaded.some((n) => n.id === currentId);
           if (stillExists) {
-            if (saveStateRef.current !== "dirty" && saveStateRef.current !== "saving") {
+            if (!["dirty", "saving", "error"].includes(saveStateRef.current)) {
               void getNote(currentId)
                 .then((note) => {
                   if (isStale()) return;
                   if (selectedIdRef.current !== currentId) return;
-                  if (saveStateRef.current === "dirty" || saveStateRef.current === "saving") {
+                  if (["dirty", "saving", "error"].includes(saveStateRef.current)) {
                     return;
                   }
                   revisionRef.current = note.updatedAt;
@@ -1140,7 +1141,7 @@ export function MainWindow({
   const performSave = useCallback(
     async (force: boolean): Promise<boolean> => {
       // 非强制保存（自动保存、切换前保存）在没有未保存修改时直接视为成功
-      if (!force && saveStateRef.current !== "dirty") return true;
+      if (!force && saveStateRef.current !== "dirty") return saveStateRef.current !== "error";
       const id = selectedIdRef.current;
       if (!id) return false;
 
@@ -1195,7 +1196,11 @@ export function MainWindow({
         ) {
           localStorage.setItem(
             `floral-conflict-main-${id}`,
-            JSON.stringify({ title: titleSnapshot, content: contentSnapshot }),
+            JSON.stringify({
+              title: titleSnapshot,
+              content: contentSnapshot,
+              expectedUpdatedAt: revisionRef.current,
+            }),
           );
           if (stillCurrent()) setConflict(true);
         }
@@ -1628,6 +1633,37 @@ export function MainWindow({
       return next;
     });
   };
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const raw = localStorage.getItem(`floral-conflict-main-${selectedId}`);
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw);
+      if (typeof draft.title !== "string" || typeof draft.content !== "string") return;
+      titleValueRef.current = draft.title;
+      contentValueRef.current = draft.content;
+      revisionRef.current = draft.expectedUpdatedAt;
+      setTitle(draft.title);
+      setContent(draft.content);
+      setConflict(true);
+      saveStateRef.current = "error";
+      setSaveState("error");
+    } catch {
+      /* Preserve an unreadable recovery record for manual recovery. */
+    }
+  }, [selectedId]);
+
+  const changePreview = useTaskPreviewUndo(
+    content,
+    (value) => {
+      contentValueRef.current = value;
+      setContent(value);
+      saveStateRef.current = "dirty";
+      setSaveState("dirty");
+    },
+    selectedId,
+  );
 
   const markDirty = () => {
     if (!selectedId) return;
@@ -2981,7 +3017,10 @@ export function MainWindow({
                   onClick={() => {
                     if (selectedId)
                       void getNote(selectedId)
-                        .then(applyNote)
+                        .then((note) => {
+                          localStorage.removeItem(`floral-conflict-main-${selectedId}`);
+                          applyNote(note);
+                        })
                         .catch((error) => showToast(getErrorMessage(error)));
                   }}
                 >
@@ -3106,10 +3145,7 @@ export function MainWindow({
                       >
                         <MarkdownPreview
                           content={content}
-                          onContentChange={(value) => {
-                            setContent(value);
-                            markDirty();
-                          }}
+                          onContentChange={changePreview}
                           fontSize={settingsConfig?.fontSize ?? 14}
                           renderHtml={settingsConfig?.renderHtmlMarkdown ?? false}
                           imageBaseDir={imageBaseDir ?? undefined}

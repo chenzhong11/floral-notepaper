@@ -38,13 +38,7 @@ fn notes_create(app: AppHandle, request: SaveNoteRequest) -> Result<Note, AppErr
 #[tauri::command]
 fn notes_update(app: AppHandle, id: String, request: SaveNoteRequest, expected_updated_at: Option<String>) -> Result<Note, AppError> {
     let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
-    let store = default_store()?;
-    if let Some(expected) = expected_updated_at {
-        let current = store.read_note(&id)?;
-        let matches = chrono::DateTime::parse_from_rfc3339(&expected).map(|time| time.with_timezone(&chrono::Utc)==current.updated_at).unwrap_or(false);
-        if !matches { return Err(AppError { code: "noteConflict".into(), message: "其他窗口已更新此笔记，草稿已保留，请另存或载入最新内容".into(), details: Default::default() }); }
-    }
-    let note = store.update_note(&id, request)?;
+    let note = default_store()?.update_note_checked(&id, request, expected_updated_at.as_deref())?;
     let _ = app.emit("notes-changed", ());
     Ok(note)
 }

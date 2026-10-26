@@ -4,6 +4,7 @@ use crate::{json_io::write_json_atomic, services::notes::{default_config_dir, de
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+static DOCK_FILE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +28,7 @@ pub struct DockState {
 fn error(message: &str) -> AppError { AppError { code: "edgeDock".into(), message: message.into(), details: Default::default() } }
 fn entries(app: &AppHandle) -> Vec<DockEntry> { app.state::<DockState>().entries.lock().unwrap().clone() }
 fn persist(app: &AppHandle) -> Result<(), AppError> {
+    let _guard = DOCK_FILE_LOCK.lock().unwrap();
     let snapshot = entries(app);
     write_json_atomic(&default_config_dir()?.join("edge-docks.json"), &snapshot)
 }
@@ -121,7 +123,7 @@ pub async fn edge_attach(app: AppHandle, window: WebviewWindow, note_id: String)
     *app.state::<DockState>().entries.lock().unwrap()=data;
     persist(&app)?;
     layout(&app)?;
-    window.emit("edge-state",serde_json::json!({"expanded":false}))?;
+    app.emit_to(window.label(),"edge-state",serde_json::json!({"expanded":false}))?;
     Ok(())
 }
 
@@ -130,7 +132,7 @@ pub fn expand_existing(app: &AppHandle, note_id: &str) -> Result<Option<String>,
     let Some(target)=all.iter().find(|e| e.note_id==note_id) else { return Ok(None) };
     if let Some(current)=all.iter().find(|e| e.expanded && e.note_id!=note_id) {
         *app.state::<DockState>().pending.lock().unwrap()=Some(note_id.to_string());
-        if let Some(w)=app.get_webview_window(&current.label) { w.emit("edge-collapse-request", Option::<String>::None)?; }
+        if app.get_webview_window(&current.label).is_some() { app.emit_to(&current.label,"edge-collapse-request", Option::<String>::None)?; }
         return Ok(Some(target.label.clone()));
     }
     {
@@ -140,7 +142,7 @@ pub fn expand_existing(app: &AppHandle, note_id: &str) -> Result<Option<String>,
     }
     layout(app)?;
     if let Some(w)=app.get_webview_window(&target.label) {
-        w.emit("edge-state",serde_json::json!({"expanded":true}))?;
+        app.emit_to(&target.label,"edge-state",serde_json::json!({"expanded":true}))?;
         w.set_focus()?;
     }
     Ok(Some(target.label.clone()))
@@ -162,7 +164,7 @@ pub async fn edge_collapse(app: AppHandle, window: WebviewWindow) -> Result<(), 
         }
     }
     persist(&app)?;
-    window.emit("edge-state",serde_json::json!({"expanded":false}))?;
+    app.emit_to(window.label(),"edge-state",serde_json::json!({"expanded":false}))?;
     layout(&app)?;
     let pending=app.state::<DockState>().pending.lock().unwrap().take();
     if let Some(id)=pending { expand_existing(&app,&id)?; }

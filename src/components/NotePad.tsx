@@ -1,3 +1,5 @@
+import { Menu } from "@tauri-apps/api/menu";
+import { useTaskPreviewUndo } from "../features/markdown/useTaskPreviewUndo";
 import { invoke } from "@tauri-apps/api/core";
 import { MarkdownPreviewLazy as MarkdownPreview } from "../features/markdown/MarkdownPreviewLazy";
 import { insertTask, continueTask } from "../features/markdown/taskEditing";
@@ -286,8 +288,12 @@ export function NotePad({
       requestAnimationFrame(() => {
         if (!cancelled) {
           hasEnteredOnce.current = true;
-          void showCurrentWindow()
-            .then(() => contentRef.current?.focus())
+          void (
+            edgeStateRef.current.mode === "edge" ? getCurrentWindow().show() : showCurrentWindow()
+          )
+            .then(() => {
+              if (edgeStateRef.current.mode !== "edge") contentRef.current?.focus();
+            })
             .catch(() => undefined);
         }
       });
@@ -403,7 +409,10 @@ export function NotePad({
           "code" in error &&
           error.code === "noteConflict"
         ) {
-          localStorage.setItem(`floral-conflict-pad-${id}`, JSON.stringify(request));
+          localStorage.setItem(
+            `floral-conflict-pad-${id}`,
+            JSON.stringify({ ...request, expectedUpdatedAt: revisionRef.current }),
+          );
           setConflict(true);
         }
         throw error;
@@ -782,6 +791,28 @@ export function NotePad({
     setContent(value);
     setStatus("dirty");
   };
+  useEffect(() => {
+    if (!editingNoteId) return;
+    const raw = localStorage.getItem(`floral-conflict-pad-${editingNoteId}`);
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw);
+      if (typeof draft.title !== "string" || typeof draft.content !== "string") return;
+      titleValueRef.current = draft.title;
+      contentValueRef.current = draft.content;
+      revisionRef.current = draft.expectedUpdatedAt;
+      setTitle(draft.title);
+      setContent(draft.content);
+      setConflict(true);
+      statusRef.current = "saveFailed";
+      setStatus("saveFailed");
+    } catch {
+      /* Keep the recovery record. */
+    }
+  }, [editingNoteId]);
+
+  const changePreview = useTaskPreviewUndo(content, changeContent, editingNoteId);
+  const contextMenuRef = useRef<Menu | null>(null);
   const collapseEdgeRef = useRef<(nextNoteId?: string) => Promise<void>>(async () => {});
   const collapseEdge = async (nextNoteId?: string) => {
     if (edgeBusy.current || !edgeStateRef.current.expanded) return;
@@ -884,13 +915,30 @@ export function NotePad({
           className="edge-tab"
           onContextMenu={(event) => {
             event.preventDefault();
-            void invoke("edge_expand", { noteId: editingIdRef.current });
+            event.stopPropagation();
+            void (async () => {
+              await contextMenuRef.current?.close();
+              const menu = await Menu.new({
+                items: [
+                  {
+                    id: "edge-undock",
+                    text: "解除吸附",
+                    action: () => {
+                      void detachEdge();
+                    },
+                  },
+                ],
+              });
+              contextMenuRef.current = menu;
+              await menu.popup();
+            })().catch((error) => showToast(getErrorMessage(error)));
           }}
         >
           <div
             className="edge-tab-grip"
             title="上下拖动调整位置"
-            onMouseDown={() => {
+            onMouseDown={(event) => {
+              event.preventDefault();
               void startCurrentWindowDrag();
             }}
           >
@@ -1093,7 +1141,11 @@ export function NotePad({
                           content,
                           category: notes.find((n) => n.id === editingNoteId)?.category ?? "",
                         })
-                          .then(applyNote)
+                          .then(async () => {
+                            localStorage.removeItem(`floral-conflict-pad-${editingNoteId}`);
+                            if (editingNoteId) applyNote(await getNote(editingNoteId));
+                            showToast("已另存草稿副本");
+                          })
                           .catch((error) => showToast(getErrorMessage(error)));
                       }}
                     >
@@ -1103,7 +1155,10 @@ export function NotePad({
                       onClick={() => {
                         if (editingNoteId)
                           void getNote(editingNoteId)
-                            .then(applyNote)
+                            .then((note) => {
+                              localStorage.removeItem(`floral-conflict-pad-${editingNoteId}`);
+                              applyNote(note);
+                            })
                             .catch((error) => showToast(getErrorMessage(error)));
                       }}
                     >
@@ -1115,7 +1170,7 @@ export function NotePad({
                   <div className="flex-1 min-h-0 overflow-auto">
                     <MarkdownPreview
                       content={content}
-                      onContentChange={changeContent}
+                      onContentChange={changePreview}
                       fontSize={surfaceFontSize}
                       imageBaseDir={imageBaseDir ?? undefined}
                     />

@@ -22,7 +22,7 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - run: cargo test --release --manifest-path src-tauri/Cargo.toml --lib
       - name: Prepare NSIS
         shell: pwsh
         run: scripts/prepare-nsis-toolchain.ps1

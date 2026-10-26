@@ -9,7 +9,7 @@ export interface TextEdit {
 }
 
 export function taskLines(value: string, start: number, end = start): TextEdit {
-  const from = value.lastIndexOf("\n", start - 1) + 1;
+  const from = start === 0 ? 0 : value.lastIndexOf("\n", start - 1) + 1;
   const last = end > start && value[end - 1] === "\n" ? end - 1 : end;
   const next = value.indexOf("\n", last);
   const to = next < 0 ? value.length : next;
@@ -41,7 +41,7 @@ export function taskLines(value: string, start: number, end = start): TextEdit {
 
 export function taskEnter(value: string, start: number, end = start): TextEdit | null {
   if (start !== end) return null;
-  const from = value.lastIndexOf("\n", start - 1) + 1;
+  const from = start === 0 ? 0 : value.lastIndexOf("\n", start - 1) + 1;
   const to = value.indexOf("\n", start);
   const line = value.slice(from, to < 0 ? value.length : to);
   const match = /^(\s*)((?:[-+*]|\d+[.)])\s+)\[[ xX]\][ \t]*(.*)$/.exec(line);
