@@ -15,6 +15,12 @@ jobs:
           node-version: "24"
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+      - name: Format Rust and export patch
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml
+          New-Item -ItemType Directory -Force workspace | Out-Null
+          git diff -- src-tauri/src | Out-File -Encoding utf8 workspace/rust-format.patch
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
@@ -33,4 +39,5 @@ jobs:
           path: |
             src-tauri/target/release/floral-notepaper.exe
             src-tauri/target/release/bundle/nsis/*.exe
+            workspace/rust-format.patch
           retention-days: 30

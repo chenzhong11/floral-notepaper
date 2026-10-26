@@ -27,6 +27,9 @@ pub struct DockState {
 
 fn error(message: &str) -> AppError { AppError { code: "edgeDock".into(), message: message.into(), details: Default::default() } }
 fn entries(app: &AppHandle) -> Vec<DockEntry> { app.state::<DockState>().entries.lock().unwrap().clone() }
+pub fn is_docked(app: &AppHandle, label: &str) -> bool {
+    app.try_state::<DockState>().map(|state| state.entries.lock().unwrap().iter().any(|e| e.label==label)).unwrap_or(false)
+}
 fn persist(app: &AppHandle) -> Result<(), AppError> {
     let _guard = DOCK_FILE_LOCK.lock().unwrap();
     let snapshot = entries(app);
@@ -82,7 +85,17 @@ fn layout(app: &AppHandle) -> Result<(), AppError> {
 pub fn initialize(app: &AppHandle) -> Result<(), AppError> {
     app.manage(DockState::default());
     let path=default_config_dir()?.join("edge-docks.json");
-    let stored: Vec<DockEntry> = if path.exists() { serde_json::from_str(&std::fs::read_to_string(path)?)? } else { Vec::new() };
+    let stored: Vec<DockEntry> = if path.exists() {
+        match std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str(&text).ok()) {
+            Some(entries) => entries,
+            None => {
+                let recovery=path.with_file_name(format!("edge-docks-recovery-{}.json",chrono::Utc::now().format("%Y%m%d%H%M%S")));
+                let _=std::fs::copy(&path,recovery);
+                eprintln!("无法读取侧边配置，已保留恢复副本；以普通窗口继续启动");
+                Vec::new()
+            }
+        }
+    } else { Vec::new() };
     for mut entry in stored {
         if default_store()?.read_note(&entry.note_id).is_err() { continue; }
         entry.label=format!("notepad-{}",entry.note_id);

@@ -7,6 +7,22 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 }));
 
 describe("MarkdownPreview", () => {
+  test("enables only real GFM task checkboxes with source positions", () => {
+    const markup = renderToStaticMarkup(
+      <MarkdownPreview
+        content={"- [ ] 未完成\n- [x] 完成\n  - [ ] 子任务\n\n```md\n- [ ] code\n```"}
+        onContentChange={() => {}}
+      />,
+    );
+    expect((markup.match(/type="checkbox"/g) ?? []).length).toBe(3);
+    expect(markup).not.toContain('disabled=""');
+    expect(markup).toContain('aria-label="未完成"');
+    expect(markup).toContain('checked=""');
+  });
+  test("keeps preview read-only when no edit callback is provided", () => {
+    const markup = renderToStaticMarkup(<MarkdownPreview content="- [ ] readonly" />);
+    expect(markup).toContain('disabled=""');
+  });
   test("marks rendered Markdown content as selectable", () => {
     const markup = renderToStaticMarkup(<MarkdownPreview content="# 花笺\n\n正文" />);
 

@@ -1159,6 +1159,14 @@ pub fn setup_desktop(app: &mut App) -> Result<(), Box<dyn Error>> {
 }
 
 pub fn handle_window_event(window: &Window, event: &WindowEvent) {
+    let docked = crate::edge_dock::is_docked(window.app_handle(),window.label());
+    if docked && !app_is_exiting(window.app_handle()) {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _=window.app_handle().emit_to(window.label(),"edge-collapse-request",Option::<String>::None);
+            return;
+        }
+    }
     if matches!(event, WindowEvent::Destroyed) {
         if let Some(note_id) = window.label().strip_prefix("tile-") {
             let _ = window
@@ -1170,6 +1178,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
 
     if matches!(event, WindowEvent::CloseRequested { .. })
         && should_save_surface_size_before_close(window.label())
+        && !docked
     {
         if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
             save_surface_size(&webview);
