@@ -999,11 +999,11 @@ export function NotePad({
         <div className={padSurfaceClassName} data-surface-mode={surfaceMode}>
           <>
             <div
-              className="flex items-center justify-between px-3 pt-3 pb-0 cursor-default"
+              className="pad-header flex items-center justify-between px-3 pt-3 pb-0 cursor-default"
               onMouseDown={handleDrag}
             >
               {surfaceMode !== "edge" && (
-                <div className="flex items-center gap-0.5">
+                <div className="pad-header-tabs flex items-center gap-0.5">
                   <button
                     onClick={resetDraft}
                     className={`relative px-2 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
@@ -1033,7 +1033,7 @@ export function NotePad({
                 </div>
               )}
 
-              <div className="ml-auto flex items-center gap-1.5">
+              <div className="pad-header-actions ml-auto flex items-center gap-1.5">
                 <button
                   className="pad-tool shrink-0 whitespace-nowrap"
                   onClick={() => (surfaceMode === "edge" ? void detachEdge() : void attachEdge())}
@@ -1151,7 +1151,6 @@ export function NotePad({
                           .then(async () => {
                             localStorage.removeItem(`floral-conflict-pad-${editingNoteId}`);
                             if (editingNoteId) applyNote(await getNote(editingNoteId));
-                            showToast("已另存草稿副本");
                           })
                           .catch((error) => showToast(getErrorMessage(error)));
                       }}

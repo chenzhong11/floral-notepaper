@@ -814,6 +814,30 @@ input::placeholder {
 .dock-action-label {
   display: none;
 }
+@media (max-width: 259px) {
+  .pad-header {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .pad-header-tabs button {
+    padding-left: 4px;
+    padding-right: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .pad-header-actions {
+    gap: 2px;
+  }
+  .pad-header-actions > button {
+    width: 20px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .pad-header-actions > .pad-tool {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
 @media (min-width: 300px) {
   .dock-action-label {
     display: inline;
