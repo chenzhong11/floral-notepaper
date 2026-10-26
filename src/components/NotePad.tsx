@@ -854,7 +854,7 @@ export function NotePad({
     let alive = true;
     let moveTimer: ReturnType<typeof setTimeout>;
     const unlisteners = [
-      listen<{ expanded: boolean }>("edge-state", (event) => {
+      getCurrentWindow().listen<{ expanded: boolean }>("edge-state", (event) => {
         if (!alive) return;
         setSurfaceMode("edge");
         setEdgeExpanded(event.payload.expanded);
@@ -876,7 +876,7 @@ export function NotePad({
           }
         }
       }),
-      listen<string | null>("edge-collapse-request", (event) => {
+      getCurrentWindow().listen<string | null>("edge-collapse-request", (event) => {
         void collapseEdgeRef.current(event.payload ?? undefined);
       }),
       getCurrentWindow().onFocusChanged(({ payload }) => {
