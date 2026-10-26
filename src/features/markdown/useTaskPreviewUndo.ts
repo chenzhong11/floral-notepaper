@@ -20,7 +20,7 @@ export function useTaskPreviewUndo(
         return;
       if (
         event.target instanceof HTMLElement &&
-        event.target.closest("input,textarea,[contenteditable=true]")
+        event.target.closest("textarea,[contenteditable=true],input:not([type=checkbox]):not([type=radio])")
       )
         return;
       const source = event.shiftKey ? redo.current : undo.current;

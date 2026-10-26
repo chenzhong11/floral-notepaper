@@ -3005,6 +3005,7 @@ export function MainWindow({
                       category: selectedNote?.category ?? "",
                     })
                       .then((note) => {
+                        localStorage.removeItem(`floral-conflict-main-${selectedId}`);
                         applyNote(note);
                         replaceNoteMetadata(note);
                       })
