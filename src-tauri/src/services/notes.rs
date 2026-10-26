@@ -805,12 +805,23 @@ impl NoteStore {
     }
 
     /// Called under the command layer's write lock so comparison and write are atomic.
-    pub fn update_note_checked(&self, id: &str, request: SaveNoteRequest, expected: Option<&str>) -> Result<Note, AppError> {
+    pub fn update_note_checked(
+        &self,
+        id: &str,
+        request: SaveNoteRequest,
+        expected: Option<&str>,
+    ) -> Result<Note, AppError> {
         if let Some(expected) = expected {
             let current = self.read_note(id)?;
             let matches = DateTime::parse_from_rfc3339(expected)
-                .map(|time| time.with_timezone(&Utc) == current.updated_at).unwrap_or(false);
-            if !matches { return Err(AppError::new("noteConflict", "其他窗口已更新此笔记，草稿已保留，请另存或载入最新内容")); }
+                .map(|time| time.with_timezone(&Utc) == current.updated_at)
+                .unwrap_or(false);
+            if !matches {
+                return Err(AppError::new(
+                    "noteConflict",
+                    "其他窗口已更新此笔记，草稿已保留，请另存或载入最新内容",
+                ));
+            }
         }
         self.update_note(id, request)
     }
@@ -1793,15 +1804,40 @@ mod tests {
 
     #[test]
     fn refuses_a_stale_window_save_without_changing_disk() {
-        let store=test_store("revision_guard");
-        let request=|content: &str| SaveNoteRequest { title:"待办".into(),content:content.into(),category:String::new() };
-        let original=store.create_note(request("- [ ] first")).unwrap();
-        let updated=store.update_note_checked(&original.id,request("- [x] first"),Some(&original.updated_at.to_rfc3339())).unwrap();
-        let result=store.update_note_checked(&original.id,request("stale overwrite"),Some(&original.updated_at.to_rfc3339()));
-        assert_eq!(result.unwrap_err().code,"noteConflict");
-        assert_eq!(store.read_note(&original.id).unwrap().content,"- [x] first");
-        assert!(store.update_note_checked(&original.id,request("bad token"),Some("invalid")).is_err());
-        assert!(store.update_note_checked(&original.id,request("fresh save"),Some(&updated.updated_at.to_rfc3339())).is_ok());
+        let store = test_store("revision_guard");
+        let request = |content: &str| SaveNoteRequest {
+            title: "待办".into(),
+            content: content.into(),
+            category: String::new(),
+        };
+        let original = store.create_note(request("- [ ] first")).unwrap();
+        let updated = store
+            .update_note_checked(
+                &original.id,
+                request("- [x] first"),
+                Some(&original.updated_at.to_rfc3339()),
+            )
+            .unwrap();
+        let result = store.update_note_checked(
+            &original.id,
+            request("stale overwrite"),
+            Some(&original.updated_at.to_rfc3339()),
+        );
+        assert_eq!(result.unwrap_err().code, "noteConflict");
+        assert_eq!(
+            store.read_note(&original.id).unwrap().content,
+            "- [x] first"
+        );
+        assert!(store
+            .update_note_checked(&original.id, request("bad token"), Some("invalid"))
+            .is_err());
+        assert!(store
+            .update_note_checked(
+                &original.id,
+                request("fresh save"),
+                Some(&updated.updated_at.to_rfc3339())
+            )
+            .is_ok());
     }
 
     #[test]

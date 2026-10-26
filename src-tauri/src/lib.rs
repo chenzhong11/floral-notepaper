@@ -1,5 +1,5 @@
-pub mod edge_dock;
 pub mod desktop;
+pub mod edge_dock;
 pub mod json_io;
 pub mod locales;
 pub mod services;
@@ -36,9 +36,15 @@ fn notes_create(app: AppHandle, request: SaveNoteRequest) -> Result<Note, AppErr
 }
 
 #[tauri::command]
-fn notes_update(app: AppHandle, id: String, request: SaveNoteRequest, expected_updated_at: Option<String>) -> Result<Note, AppError> {
+fn notes_update(
+    app: AppHandle,
+    id: String,
+    request: SaveNoteRequest,
+    expected_updated_at: Option<String>,
+) -> Result<Note, AppError> {
     let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
-    let note = default_store()?.update_note_checked(&id, request, expected_updated_at.as_deref())?;
+    let note =
+        default_store()?.update_note_checked(&id, request, expected_updated_at.as_deref())?;
     let _ = app.emit("notes-changed", ());
     Ok(note)
 }
@@ -450,15 +456,17 @@ pub fn run() {
         .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_opener::init())
-;
-    let builder = if std::env::var("FLORAL_NOTEPAPER_ISOLATED").ok().as_deref()==Some("1") { builder } else { builder
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_opener::init());
+    let builder = if std::env::var("FLORAL_NOTEPAPER_ISOLATED").ok().as_deref() == Some("1") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(file_path) = desktop::extract_file_arg(&args) {
                 let _ = app.emit("open-external-file", file_path);
             }
             let _ = desktop::show_main_window(app);
-        })) };
+        }))
+    };
     builder
         .setup(|app| {
             if let Ok(store) = default_store() {
@@ -474,7 +482,9 @@ pub fn run() {
             app.manage(updater_state);
             // MSIX installs are updated by the Microsoft Store; the scheduler
             // must never drive in-app updates against a read-only package.
-            if std::env::var("FLORAL_NOTEPAPER_ISOLATED").ok().as_deref()!=Some("1") && !updater::platform::has_package_identity() {
+            if std::env::var("FLORAL_NOTEPAPER_ISOLATED").ok().as_deref() != Some("1")
+                && !updater::platform::has_package_identity()
+            {
                 updater::start_auto_check_scheduler(app.handle().clone());
             }
             desktop::setup_desktop(app)?;

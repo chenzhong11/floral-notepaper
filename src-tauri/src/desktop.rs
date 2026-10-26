@@ -1159,11 +1159,15 @@ pub fn setup_desktop(app: &mut App) -> Result<(), Box<dyn Error>> {
 }
 
 pub fn handle_window_event(window: &Window, event: &WindowEvent) {
-    let docked = crate::edge_dock::is_docked(window.app_handle(),window.label());
+    let docked = crate::edge_dock::is_docked(window.app_handle(), window.label());
     if docked && !app_is_exiting(window.app_handle()) {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            let _=window.app_handle().emit_to(window.label(),"edge-collapse-request",Option::<String>::None);
+            let _ = window.app_handle().emit_to(
+                window.label(),
+                "edge-collapse-request",
+                Option::<String>::None,
+            );
             return;
         }
     }
@@ -1440,7 +1444,9 @@ fn open_notepad_window_now(
     bounds: Option<WindowBounds>,
 ) -> Result<String, AppError> {
     if let Some(id) = note_id {
-        if let Some(label) = crate::edge_dock::expand_existing(app,id)? { return Ok(label) }
+        if let Some(label) = crate::edge_dock::expand_existing(app, id)? {
+            return Ok(label);
+        }
     }
     if note_id.is_none() {
         if let Some(reused) = activate_pooled_notepad(app, bounds) {
@@ -1785,7 +1791,9 @@ fn open_tile_window_now(
     note_id: &str,
     bounds: Option<WindowBounds>,
 ) -> Result<String, AppError> {
-    if let Some(label) = crate::edge_dock::expand_existing(app,note_id)? { return Ok(label) }
+    if let Some(label) = crate::edge_dock::expand_existing(app, note_id)? {
+        return Ok(label);
+    }
     let locale = configured_locale();
     let label = tile_window_label(note_id);
     let url = format!("index.html?view=tile&noteId={note_id}");
