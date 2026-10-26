@@ -1,6 +1,6 @@
 import type { WindowBounds } from "./api";
 
-export type NoteSurfaceMode = "pad" | "tile";
+export type NoteSurfaceMode = "pad" | "tile" | "edge";
 
 export const NOTE_SURFACE_MODE_EVENT = "floral-notepaper:surface-mode";
 
@@ -10,10 +10,11 @@ export const SURFACE_WINDOW_SIZES: Record<
 > = {
   pad: { width: 260, height: 260 },
   tile: { width: 260, height: 260 },
+  edge: { width: 420, height: 560 },
 };
 
 export function isNoteSurfaceMode(value: unknown): value is NoteSurfaceMode {
-  return value === "pad" || value === "tile";
+  return value === "pad" || value === "tile" || value === "edge";
 }
 
 export function getSurfaceTargetBounds(

@@ -751,3 +751,74 @@ input::placeholder {
 :root[data-theme="dark"] .markdown-alert-caution .markdown-alert-title {
   color: #e87462;
 }
+
+/* Personal todo + edge dock additions. */
+.markdown-selectable li:has(> input[type="checkbox"]:checked),
+.markdown-selectable li:has(> p > input[type="checkbox"]:checked) {
+  text-decoration: line-through;
+  opacity: 0.62;
+}
+.markdown-selectable input[type="checkbox"]:not(:disabled) {
+  cursor: pointer;
+  width: 15px;
+  height: 15px;
+  vertical-align: middle;
+}
+.edge-tab {
+  height: 100%;
+  width: 100%;
+  border: 1px solid var(--color-bamboo, #748d72);
+  border-radius: 10px 0 0 10px;
+  background: var(--color-paper, #faf8f2);
+  color: var(--color-ink, #35382f);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 2px 8px #0002;
+}
+.edge-tab-grip {
+  height: 20px;
+  text-align: center;
+  cursor: ns-resize;
+  opacity: 0.65;
+  user-select: none;
+}
+.edge-tab-label {
+  flex: 1;
+  writing-mode: vertical-rl;
+  margin: auto;
+  padding: 7px 9px;
+  font-size: 13px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.pad-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 2px 0 8px;
+  flex-shrink: 0;
+}
+.pad-tool {
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--color-bamboo, #688466);
+}
+.pad-tool:hover {
+  background: #78936d18;
+}
+.draft-conflict {
+  padding: 8px 12px;
+  font-size: 12px;
+  background: #f1bd4b22;
+  color: var(--color-ink, #6a5020);
+}
+.draft-conflict button {
+  margin-left: 10px;
+  text-decoration: underline;
+  cursor: pointer;
+}

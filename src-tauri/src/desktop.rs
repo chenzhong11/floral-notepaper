@@ -1430,6 +1430,9 @@ fn open_notepad_window_now(
     note_id: Option<&str>,
     bounds: Option<WindowBounds>,
 ) -> Result<String, AppError> {
+    if let Some(id) = note_id {
+        if let Some(label) = crate::edge_dock::expand_existing(app,id)? { return Ok(label) }
+    }
     if note_id.is_none() {
         if let Some(reused) = activate_pooled_notepad(app, bounds) {
             clear_hidden_window_state(app);
@@ -1773,6 +1776,7 @@ fn open_tile_window_now(
     note_id: &str,
     bounds: Option<WindowBounds>,
 ) -> Result<String, AppError> {
+    if let Some(label) = crate::edge_dock::expand_existing(app,note_id)? { return Ok(label) }
     let locale = configured_locale();
     let label = tile_window_label(note_id);
     let url = format!("index.html?view=tile&noteId={note_id}");

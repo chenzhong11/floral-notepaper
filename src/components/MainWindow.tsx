@@ -1,3 +1,4 @@
+import { insertTask, continueTask } from "../features/markdown/taskEditing";
 import {
   useCallback,
   useDeferredValue,
@@ -122,6 +123,7 @@ interface CategoryMenuState {
 }
 
 type FormatAction =
+  | "task"
   | "bold"
   | "italic"
   | "heading"
@@ -153,6 +155,12 @@ function applyFormat(
   let cursorEnd: number;
 
   switch (action) {
+    case "task":
+      insertTask(textarea, (value) => {
+        setContent(value);
+        markDirty();
+      });
+      return;
     case "bold": {
       const fallback = translate("main.formatSample.boldText", { defaultValue: "粗体文本" });
       const wrapped = `**${selected || fallback}**`;
@@ -445,6 +453,8 @@ export function MainWindow({
   // 已切换到别处，该次结果直接丢弃，避免旧的加载结果覆盖新选中的笔记
   const loadEpoch = useLoadEpoch();
   // 串行化所有保存请求，避免自动保存与切换触发的保存并发写同一篇笔记
+  const revisionRef = useRef<string | undefined>(undefined);
+  const [conflict, setConflict] = useState(false);
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const selectedNote = useMemo(
@@ -483,6 +493,7 @@ export function MainWindow({
     { label: string; title: string; style: string; action: FormatAction }[]
   >(
     () => [
+      { label: "☑", title: "待办", style: "", action: "task" },
       {
         label: "B",
         title: t("main.toolbar.bold", { defaultValue: "粗体" }),
@@ -609,6 +620,8 @@ export function MainWindow({
     (note: Note) => {
       // 立刻同步各 ref，保证保存快照与守卫在下一次渲染前就能读到最新值
       loadEpoch.bump();
+      revisionRef.current = note.updatedAt;
+      setConflict(false);
       selectedIdRef.current = note.id;
       titleValueRef.current = note.title;
       contentValueRef.current = note.content;
@@ -907,6 +920,7 @@ export function MainWindow({
                   if (saveStateRef.current === "dirty" || saveStateRef.current === "saving") {
                     return;
                   }
+                  revisionRef.current = note.updatedAt;
                   titleValueRef.current = note.title;
                   contentValueRef.current = note.content;
                   saveStateRef.current = "saved";
@@ -1155,11 +1169,16 @@ export function MainWindow({
           settleSaveState(contentValueRef.current === contentSnapshot ? "saved" : "dirty");
         } else {
           const category = notesRef.current.find((note) => note.id === id)?.category ?? "";
-          const note = await updateNote(id, {
-            title: titleSnapshot,
-            content: contentSnapshot,
-            category,
-          });
+          const note = await updateNote(
+            id,
+            {
+              title: titleSnapshot,
+              content: contentSnapshot,
+              category,
+            },
+            revisionRef.current,
+          );
+          if (stillCurrent()) revisionRef.current = note.updatedAt;
           replaceNoteMetadata(note);
           const contentChanged =
             contentValueRef.current !== contentSnapshot || titleValueRef.current !== titleSnapshot;
@@ -1168,6 +1187,18 @@ export function MainWindow({
         return true;
       } catch (error) {
         settleSaveState("error");
+        if (
+          typeof error === "object" &&
+          error &&
+          "code" in error &&
+          error.code === "noteConflict"
+        ) {
+          localStorage.setItem(
+            `floral-conflict-main-${id}`,
+            JSON.stringify({ title: titleSnapshot, content: contentSnapshot }),
+          );
+          if (stillCurrent()) setConflict(true);
+        }
         showToast(getErrorMessage(error));
         return false;
       }
@@ -2927,6 +2958,37 @@ export function MainWindow({
               </div>
             </div>
 
+            {conflict && (
+              <div className="draft-conflict" role="alert">
+                其他窗口已更新此笔记，当前草稿已保留。
+                <button
+                  onClick={() => {
+                    void createNote({
+                      title: title + "（草稿副本）",
+                      content,
+                      category: selectedNote?.category ?? "",
+                    })
+                      .then((note) => {
+                        applyNote(note);
+                        replaceNoteMetadata(note);
+                      })
+                      .catch((error) => showToast(getErrorMessage(error)));
+                  }}
+                >
+                  另存草稿
+                </button>
+                <button
+                  onClick={() => {
+                    if (selectedId)
+                      void getNote(selectedId)
+                        .then(applyNote)
+                        .catch((error) => showToast(getErrorMessage(error)));
+                  }}
+                >
+                  载入最新
+                </button>
+              </div>
+            )}
             <div
               key={viewMode}
               ref={splitContainerRef}
@@ -2950,7 +3012,12 @@ export function MainWindow({
                             title={button.title}
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => {
-                              if (contentRef.current) {
+                              if (contentRef.current && button.action === "task") {
+                                insertTask(contentRef.current, (value) => {
+                                  setContent(value);
+                                  markDirty();
+                                });
+                              } else if (contentRef.current) {
                                 applyFormat(
                                   contentRef.current,
                                   button.action,
@@ -2976,6 +3043,12 @@ export function MainWindow({
                             setContent(event.target.value);
                             markDirty();
                           }}
+                          onKeyDown={(event) =>
+                            continueTask(event, (value) => {
+                              setContent(value);
+                              markDirty();
+                            })
+                          }
                           onPaste={imagePasteHandler}
                           onDrop={imageDropHandler}
                           onDragOver={imageDragOverHandler}
@@ -3032,7 +3105,11 @@ export function MainWindow({
                         }`}
                       >
                         <MarkdownPreview
-                          content={deferredContent}
+                          content={content}
+                          onContentChange={(value) => {
+                            setContent(value);
+                            markDirty();
+                          }}
                           fontSize={settingsConfig?.fontSize ?? 14}
                           renderHtml={settingsConfig?.renderHtmlMarkdown ?? false}
                           imageBaseDir={imageBaseDir ?? undefined}

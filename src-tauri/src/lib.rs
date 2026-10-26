@@ -1,3 +1,4 @@
+pub mod edge_dock;
 pub mod desktop;
 pub mod json_io;
 pub mod locales;
@@ -5,6 +6,7 @@ pub mod services;
 pub mod updater;
 
 use locales::Locale;
+static NOTE_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 use services::notes::{default_store, AppConfig, AppError, Note, NoteMetadata, SaveNoteRequest};
 use std::{env, fs, io::Write, path::PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
@@ -27,21 +29,31 @@ fn notes_get(id: String) -> Result<Note, AppError> {
 
 #[tauri::command]
 fn notes_create(app: AppHandle, request: SaveNoteRequest) -> Result<Note, AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
     let note = default_store()?.create_note(request)?;
     let _ = app.emit("notes-changed", ());
     Ok(note)
 }
 
 #[tauri::command]
-fn notes_update(app: AppHandle, id: String, request: SaveNoteRequest) -> Result<Note, AppError> {
-    let note = default_store()?.update_note(&id, request)?;
+fn notes_update(app: AppHandle, id: String, request: SaveNoteRequest, expected_updated_at: Option<String>) -> Result<Note, AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
+    let store = default_store()?;
+    if let Some(expected) = expected_updated_at {
+        let current = store.read_note(&id)?;
+        let matches = chrono::DateTime::parse_from_rfc3339(&expected).map(|time| time.with_timezone(&chrono::Utc)==current.updated_at).unwrap_or(false);
+        if !matches { return Err(AppError { code: "noteConflict".into(), message: "其他窗口已更新此笔记，草稿已保留，请另存或载入最新内容".into(), details: Default::default() }); }
+    }
+    let note = store.update_note(&id, request)?;
     let _ = app.emit("notes-changed", ());
     Ok(note)
 }
 
 #[tauri::command]
 fn notes_delete(app: AppHandle, id: String) -> Result<(), AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
     default_store()?.delete_note(&id)?;
+    edge_dock::remove_note(&app, &id)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
 }
@@ -52,6 +64,7 @@ fn notes_import_markdown(
     path: String,
     category: Option<String>,
 ) -> Result<Note, AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
     let note = default_store()?
         .import_markdown_file(&PathBuf::from(path), &category.unwrap_or_default())?;
     let _ = app.emit("notes-changed", ());
@@ -113,6 +126,7 @@ fn categories_list() -> Result<Vec<String>, AppError> {
 
 #[tauri::command]
 fn categories_create(app: AppHandle, name: String) -> Result<(), AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
     default_store()?.create_category(&name)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
@@ -120,6 +134,7 @@ fn categories_create(app: AppHandle, name: String) -> Result<(), AppError> {
 
 #[tauri::command]
 fn categories_rename(app: AppHandle, old_name: String, new_name: String) -> Result<(), AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
     default_store()?.rename_category(&old_name, &new_name)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
@@ -127,6 +142,7 @@ fn categories_rename(app: AppHandle, old_name: String, new_name: String) -> Resu
 
 #[tauri::command]
 fn categories_delete(app: AppHandle, name: String) -> Result<(), AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
     default_store()?.delete_category(&name)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
@@ -138,6 +154,7 @@ fn notes_move_category(
     id: String,
     category: String,
 ) -> Result<NoteMetadata, AppError> {
+    let _write_guard = NOTE_WRITE_LOCK.lock().unwrap();
     let result = default_store()?.move_note_to_category(&id, &category)?;
     let _ = app.emit("notes-changed", ());
     Ok(result)
@@ -435,17 +452,20 @@ pub fn try_exit_for_cli_version_or_help() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+;
+    let builder = if std::env::var("FLORAL_NOTEPAPER_ISOLATED").ok().as_deref()==Some("1") { builder } else { builder
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(file_path) = desktop::extract_file_arg(&args) {
                 let _ = app.emit("open-external-file", file_path);
             }
             let _ = desktop::show_main_window(app);
-        }))
+        })) };
+    builder
         .setup(|app| {
             if let Ok(store) = default_store() {
                 let data = store.data_dir();
@@ -460,15 +480,21 @@ pub fn run() {
             app.manage(updater_state);
             // MSIX installs are updated by the Microsoft Store; the scheduler
             // must never drive in-app updates against a read-only package.
-            if !updater::platform::has_package_identity() {
+            if std::env::var("FLORAL_NOTEPAPER_ISOLATED").ok().as_deref()!=Some("1") && !updater::platform::has_package_identity() {
                 updater::start_auto_check_scheduler(app.handle().clone());
             }
             desktop::setup_desktop(app)?;
+            edge_dock::initialize(app.handle())?;
             Ok(())
         })
         .on_window_event(desktop::handle_window_event)
         .invoke_handler(tauri::generate_handler![
             app_name,
+            edge_dock::edge_attach,
+            edge_dock::edge_expand,
+            edge_dock::edge_collapse,
+            edge_dock::edge_detach,
+            edge_dock::edge_reposition,
             notes_list,
             notes_get,
             notes_create,

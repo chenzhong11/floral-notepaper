@@ -67,3 +67,7 @@ temp/
 nul
 tsconfig.tsbuildinfo
 Docs/windows-install-chain-code-review.md
+
+# Local personalization work and data copies (never upload)
+workspace/
+outputs/

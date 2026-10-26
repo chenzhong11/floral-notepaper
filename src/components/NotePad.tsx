@@ -1,3 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
+import { MarkdownPreviewLazy as MarkdownPreview } from "../features/markdown/MarkdownPreviewLazy";
+import { insertTask, continueTask } from "../features/markdown/taskEditing";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
@@ -126,7 +129,19 @@ export function NotePad({
   initialTileColor = DEFAULT_TILE_COLOR,
 }: NotePadProps) {
   const { t } = useTranslation();
-  const [surfaceMode, setSurfaceMode] = useState<NoteSurfaceMode>(initialSurfaceMode);
+  const [surfaceMode, setSurfaceMode] = useState<NoteSurfaceMode>(
+    new URLSearchParams(window.location.search).has("edge") ? "edge" : initialSurfaceMode,
+  );
+  const [preview, setPreview] = useState(new URLSearchParams(window.location.search).has("edge"));
+  const [edgeExpanded, setEdgeExpanded] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const edgeBusy = useRef(false);
+  const edgeStateRef = useRef({ mode: surfaceMode, expanded: edgeExpanded });
+  edgeStateRef.current = { mode: surfaceMode, expanded: edgeExpanded };
+  const revisionRef = useRef<string | undefined>(undefined);
+  const editingIdRef = useRef<string | null>(null);
+  const savingRef = useRef(false);
+  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const [mode, setMode] = useState<OpenMode>("new");
   const [notes, setNotes] = useState<NoteMetadata[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -195,6 +210,12 @@ export function NotePad({
   }, []);
 
   const applyNote = useCallback((note: Note) => {
+    editingIdRef.current = note.id;
+    revisionRef.current = note.updatedAt;
+    titleValueRef.current = note.title;
+    contentValueRef.current = note.content;
+    statusRef.current = "opened";
+    setConflict(false);
     setEditingNoteId(note.id);
     setTitle(note.title);
     setContent(note.content);
@@ -237,12 +258,26 @@ export function NotePad({
 
   useEffect(() => {
     const unlisten = listen("notes-changed", () => {
-      void refreshNotes().catch(() => undefined);
+      void refreshNotes()
+        .then(async (loaded) => {
+          const id = editingIdRef.current;
+          if (!id || savingRef.current || ["dirty", "saveFailed"].includes(statusRef.current))
+            return;
+          if (!loaded.some((note) => note.id === id)) return;
+          const note = await getNote(id);
+          if (
+            editingIdRef.current === id &&
+            !savingRef.current &&
+            !["dirty", "saveFailed"].includes(statusRef.current)
+          )
+            applyNote(note);
+        })
+        .catch(() => undefined);
     });
     return () => {
       void unlisten.then((fn) => fn());
     };
-  }, [refreshNotes]);
+  }, [refreshNotes, applyNote]);
 
   useEffect(() => {
     if (isStandby.current) return;
@@ -333,26 +368,52 @@ export function NotePad({
     };
   }, [refreshNotes]);
 
-  const saveNote = useCallback(async () => {
-    const existingCategory = notes.find((n) => n.id === editingNoteId)?.category ?? "";
-    const request = { title, content, category: existingCategory };
-    const note = editingNoteId
-      ? await updateNote(editingNoteId, request)
-      : await createNote(request);
-
-    setEditingNoteId(note.id);
-    setNotes((current) => {
-      const metadata = metadataFromNote(note);
-      const exists = current.some((item) => item.id === note.id);
-      const next = exists
-        ? current.map((item) => (item.id === note.id ? metadata : item))
-        : [metadata, ...current];
-      return [...next].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const saveNote = useCallback((): Promise<Note> => {
+    const run = saveQueueRef.current.then(async () => {
+      const id = editingIdRef.current;
+      const titleSnapshot = titleValueRef.current;
+      const contentSnapshot = contentValueRef.current;
+      const request = {
+        title: titleSnapshot,
+        content: contentSnapshot,
+        category: notes.find((n) => n.id === id)?.category ?? "",
+      };
+      savingRef.current = true;
+      try {
+        const note = id
+          ? await updateNote(id, request, revisionRef.current)
+          : await createNote(request);
+        editingIdRef.current = note.id;
+        revisionRef.current = note.updatedAt;
+        setEditingNoteId(note.id);
+        setNotes((current) => [metadataFromNote(note), ...current.filter((n) => n.id !== note.id)]);
+        const nextStatus =
+          contentValueRef.current !== contentSnapshot || titleValueRef.current !== titleSnapshot
+            ? "dirty"
+            : "saved";
+        statusRef.current = nextStatus;
+        setStatus(nextStatus);
+        return note;
+      } catch (error) {
+        statusRef.current = "saveFailed";
+        setStatus("saveFailed");
+        if (
+          typeof error === "object" &&
+          error &&
+          "code" in error &&
+          error.code === "noteConflict"
+        ) {
+          localStorage.setItem(`floral-conflict-pad-${id}`, JSON.stringify(request));
+          setConflict(true);
+        }
+        throw error;
+      } finally {
+        savingRef.current = false;
+      }
     });
-    const contentChanged = contentValueRef.current !== content || titleValueRef.current !== title;
-    setStatus(contentChanged ? "dirty" : "saved");
-    return note;
-  }, [content, editingNoteId, notes, title]);
+    saveQueueRef.current = run.catch(() => undefined);
+    return run;
+  }, [notes]);
 
   // 通过 ref 持有最新的 saveNote，让下方的 Tauri 监听只注册一次，
   // 避免每次输入（content 变化）都注销再重注册事件监听
@@ -593,6 +654,10 @@ export function NotePad({
   };
 
   const handleClose = useCallback(() => {
+    if (edgeStateRef.current.mode === "edge") {
+      void collapseEdgeRef.current();
+      return;
+    }
     setIsExiting(true);
     if (surfaceMode === "tile") {
       void closeCurrentWindow().catch((error) => {
@@ -702,12 +767,108 @@ export function NotePad({
   };
 
   const resetDraft = () => {
+    editingIdRef.current = null;
+    revisionRef.current = undefined;
     setEditingNoteId(null);
     setTitle("");
     setContent("");
     setMode("new");
     setStatus("empty");
   };
+
+  const changeContent = (value: string) => {
+    contentValueRef.current = value;
+    statusRef.current = "dirty";
+    setContent(value);
+    setStatus("dirty");
+  };
+  const collapseEdgeRef = useRef<(nextNoteId?: string) => Promise<void>>(async () => {});
+  const collapseEdge = async (nextNoteId?: string) => {
+    if (edgeBusy.current || !edgeStateRef.current.expanded) return;
+    edgeBusy.current = true;
+    try {
+      if (["dirty", "saveFailed"].includes(statusRef.current)) await saveNoteRef.current();
+      if (statusRef.current === "dirty") throw new Error("内容仍在变化，请稍后收起");
+      await invoke("edge_collapse");
+      if (nextNoteId) await invoke("edge_expand", { noteId: nextNoteId });
+    } catch (error) {
+      showToast(getErrorMessage(error));
+    } finally {
+      edgeBusy.current = false;
+    }
+  };
+  collapseEdgeRef.current = collapseEdge;
+  const attachEdge = async () => {
+    try {
+      const note = await saveNoteRef.current();
+      await invoke("edge_attach", { noteId: note.id });
+      setMode("new");
+      setPreview(true);
+      setEdgeExpanded(false);
+      setSurfaceMode("edge");
+    } catch (error) {
+      showToast(getErrorMessage(error));
+    }
+  };
+  const detachEdge = async () => {
+    try {
+      await invoke("edge_detach");
+      setSurfaceMode("pad");
+      setPreview(false);
+    } catch (error) {
+      showToast(getErrorMessage(error));
+    }
+  };
+  useEffect(() => {
+    let alive = true;
+    let moveTimer: ReturnType<typeof setTimeout>;
+    const unlisteners = [
+      listen<{ expanded: boolean }>("edge-state", (event) => {
+        if (!alive) return;
+        setSurfaceMode("edge");
+        setEdgeExpanded(event.payload.expanded);
+        if (event.payload.expanded) {
+          setPreview(true);
+          const id = editingIdRef.current;
+          if (id && !["dirty", "saveFailed"].includes(statusRef.current)) {
+            void getNote(id)
+              .then((note) => {
+                if (
+                  alive &&
+                  editingIdRef.current === id &&
+                  !savingRef.current &&
+                  !["dirty", "saveFailed"].includes(statusRef.current)
+                )
+                  applyNote(note);
+              })
+              .catch((error) => showToast(getErrorMessage(error)));
+          }
+        }
+      }),
+      listen<string | null>("edge-collapse-request", (event) => {
+        void collapseEdgeRef.current(event.payload ?? undefined);
+      }),
+      getCurrentWindow().onFocusChanged(({ payload }) => {
+        if (!payload)
+          setTimeout(() => {
+            if (!document.hasFocus() && edgeStateRef.current.mode === "edge")
+              void collapseEdgeRef.current();
+          }, 180);
+      }),
+      getCurrentWindow().onMoved(() => {
+        clearTimeout(moveTimer);
+        if (edgeStateRef.current.mode === "edge" && !edgeStateRef.current.expanded)
+          moveTimer = setTimeout(() => {
+            void invoke("edge_reposition").catch(() => undefined);
+          }, 300);
+      }),
+    ];
+    return () => {
+      alive = false;
+      clearTimeout(moveTimer);
+      for (const p of unlisteners) void p.then((fn) => fn());
+    };
+  }, [applyNote]);
 
   const isTile = surfaceMode === "tile";
   const tileTitle = title.trim();
@@ -718,7 +879,36 @@ export function NotePad({
 
   return (
     <div className={surfaceWrapperClassName}>
-      {isTile ? (
+      {surfaceMode === "edge" && !edgeExpanded ? (
+        <div
+          className="edge-tab"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            void invoke("edge_expand", { noteId: editingIdRef.current });
+          }}
+        >
+          <div
+            className="edge-tab-grip"
+            title="上下拖动调整位置"
+            onMouseDown={() => {
+              void startCurrentWindowDrag();
+            }}
+          >
+            ⠿
+          </div>
+          <button
+            className="edge-tab-label"
+            title={title || "无标题笔记"}
+            onClick={() =>
+              void invoke("edge_expand", { noteId: editingIdRef.current }).catch((error) =>
+                showToast(getErrorMessage(error)),
+              )
+            }
+          >
+            {(title.trim() || "笔记").slice(0, 6)}
+          </button>
+        </div>
+      ) : isTile ? (
         <Tile
           title={tileTitle || undefined}
           content={content}
@@ -763,37 +953,47 @@ export function NotePad({
               className="flex items-center justify-between px-4 pt-3 pb-0 cursor-default"
               onMouseDown={handleDrag}
             >
-              <div className="flex items-center gap-0.5">
-                <button
-                  onClick={resetDraft}
-                  className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
-                    mode === "new"
-                      ? "text-bamboo font-medium"
-                      : "text-ink-ghost hover:text-ink-faint"
-                  }`}
-                >
-                  {editingNoteId ? tabLabels.edit : tabLabels.new}
-                  {mode === "new" && (
-                    <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
-                  )}
-                </button>
-                <button
-                  onClick={() => setMode("open")}
-                  className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
-                    mode === "open"
-                      ? "text-bamboo font-medium"
-                      : "text-ink-ghost hover:text-ink-faint"
-                  }`}
-                >
-                  {tabLabels.open}
-                  {mode === "open" && (
-                    <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
-                  )}
-                </button>
-              </div>
+              {surfaceMode !== "edge" && (
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={resetDraft}
+                    className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                      mode === "new"
+                        ? "text-bamboo font-medium"
+                        : "text-ink-ghost hover:text-ink-faint"
+                    }`}
+                  >
+                    {editingNoteId ? tabLabels.edit : tabLabels.new}
+                    {mode === "new" && (
+                      <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setMode("open")}
+                    className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                      mode === "open"
+                        ? "text-bamboo font-medium"
+                        : "text-ink-ghost hover:text-ink-faint"
+                    }`}
+                  >
+                    {tabLabels.open}
+                    {mode === "open" && (
+                      <div className="absolute bottom-0 left-3 right-3 h-[2px] bg-bamboo rounded-full" />
+                    )}
+                  </button>
+                </div>
+              )}
 
               <div className="ml-auto flex items-center gap-1.5">
                 <button
+                  className="pad-tool"
+                  onClick={() => (surfaceMode === "edge" ? void detachEdge() : void attachEdge())}
+                  title={surfaceMode === "edge" ? "解除吸附" : "吸附到右侧"}
+                >
+                  {surfaceMode === "edge" ? "解除吸附" : "⇥ 右侧吸附"}
+                </button>
+                <button
+                  hidden={surfaceMode === "edge"}
                   onClick={() => void handlePin()}
                   className="group w-7 h-7 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer text-ink-ghost hover:text-ink-faint hover:bg-paper-warm"
                   title={t("notepad.tooltip.pinToTile", { defaultValue: "转为磁贴" })}
@@ -845,7 +1045,9 @@ export function NotePad({
                   type="text"
                   value={title}
                   onChange={(event) => {
+                    titleValueRef.current = event.target.value;
                     setTitle(event.target.value);
+                    statusRef.current = "dirty";
                     setStatus("dirty");
                   }}
                   onKeyDown={(event) => {
@@ -859,33 +1061,100 @@ export function NotePad({
                   style={{ fontSize: `${surfaceFontSize}px` }}
                 />
 
-                <textarea
-                  ref={contentRef}
-                  data-tab-indent="true"
-                  value={content}
-                  onChange={(event) => {
-                    setContent(event.target.value);
-                    setStatus("dirty");
-                  }}
-                  onPaste={imagePasteHandler}
-                  onDrop={imageDropHandler}
-                  onDragOver={imageDragOverHandler}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowUp") {
-                      const ta = contentRef.current;
-                      if (ta && ta.selectionStart === ta.selectionEnd) {
-                        const textBeforeCursor = content.slice(0, ta.selectionStart);
-                        if (!textBeforeCursor.includes("\n")) {
-                          event.preventDefault();
-                          titleRef.current?.focus();
+                <div className="pad-tools">
+                  <button className="pad-tool" onClick={() => setPreview((value) => !value)}>
+                    {preview ? "编辑" : "预览"}
+                  </button>
+                  <button
+                    className="pad-tool"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setPreview(false);
+                      requestAnimationFrame(() => {
+                        if (contentRef.current) insertTask(contentRef.current, changeContent);
+                      });
+                    }}
+                  >
+                    ☑ 待办
+                  </button>
+                  {surfaceMode === "edge" && (
+                    <button className="pad-tool" onClick={() => void collapseEdge()}>
+                      收起 ›
+                    </button>
+                  )}
+                </div>
+                {conflict && (
+                  <div className="draft-conflict" role="alert">
+                    其他窗口已更新，草稿已保留。
+                    <button
+                      onClick={() => {
+                        void createNote({
+                          title: title + "（草稿副本）",
+                          content,
+                          category: notes.find((n) => n.id === editingNoteId)?.category ?? "",
+                        })
+                          .then(applyNote)
+                          .catch((error) => showToast(getErrorMessage(error)));
+                      }}
+                    >
+                      另存草稿
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (editingNoteId)
+                          void getNote(editingNoteId)
+                            .then(applyNote)
+                            .catch((error) => showToast(getErrorMessage(error)));
+                      }}
+                    >
+                      载入最新
+                    </button>
+                  </div>
+                )}
+                {preview ? (
+                  <div className="flex-1 min-h-0 overflow-auto">
+                    <MarkdownPreview
+                      content={content}
+                      onContentChange={changeContent}
+                      fontSize={surfaceFontSize}
+                      imageBaseDir={imageBaseDir ?? undefined}
+                    />
+                  </div>
+                ) : (
+                  <textarea
+                    ref={contentRef}
+                    data-tab-indent="true"
+                    value={content}
+                    onChange={(event) => {
+                      contentValueRef.current = event.target.value;
+                      setContent(event.target.value);
+                      statusRef.current = "dirty";
+                      setStatus("dirty");
+                    }}
+                    onPaste={imagePasteHandler}
+                    onDrop={imageDropHandler}
+                    onDragOver={imageDragOverHandler}
+                    onKeyDown={(event) => {
+                      if (continueTask(event, changeContent)) return;
+                      if (event.key === "ArrowUp") {
+                        const ta = contentRef.current;
+                        if (ta && ta.selectionStart === ta.selectionEnd) {
+                          const textBeforeCursor = content.slice(0, ta.selectionStart);
+                          if (!textBeforeCursor.includes("\n")) {
+                            event.preventDefault();
+                            titleRef.current?.focus();
+                          }
                         }
                       }
-                    }
-                  }}
-                  placeholder={t("notepad.placeholder.content", { defaultValue: "写点什么……" })}
-                  className="w-full flex-1 min-h-0 pb-2 leading-relaxed text-ink-soft font-body placeholder:text-ink-ghost/50"
-                  style={{ fontSize: `${surfaceFontSize}px`, tabSize: `var(--tab-indent-size, 2)` }}
-                />
+                    }}
+                    placeholder={t("notepad.placeholder.content", { defaultValue: "写点什么……" })}
+                    className="w-full flex-1 min-h-0 pb-2 leading-relaxed text-ink-soft font-body placeholder:text-ink-ghost/50"
+                    style={{
+                      fontSize: `${surfaceFontSize}px`,
+                      tabSize: `var(--tab-indent-size, 2)`,
+                    }}
+                  />
+                )}
 
                 <div className="flex items-center justify-between mt-auto pt-2 border-t border-paper-deep/30 shrink-0">
                   <span className="text-[11px] text-ink-ghost font-mono tabular-nums truncate max-w-[170px]">
@@ -893,6 +1162,7 @@ export function NotePad({
                   </span>
                   <div className="flex items-center gap-2">
                     <button
+                      hidden={surfaceMode === "edge"}
                       onClick={resetDraft}
                       className="px-4 py-1.5 text-[12px] text-ink-faint hover:text-ink-soft rounded-lg hover:bg-paper-warm transition-all duration-200 cursor-pointer"
                     >
