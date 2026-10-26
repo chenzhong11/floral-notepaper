@@ -999,14 +999,14 @@ export function NotePad({
         <div className={padSurfaceClassName} data-surface-mode={surfaceMode}>
           <>
             <div
-              className="flex items-center justify-between px-4 pt-3 pb-0 cursor-default"
+              className="flex items-center justify-between px-3 pt-3 pb-0 cursor-default"
               onMouseDown={handleDrag}
             >
               {surfaceMode !== "edge" && (
                 <div className="flex items-center gap-0.5">
                   <button
                     onClick={resetDraft}
-                    className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                    className={`relative px-2 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
                       mode === "new"
                         ? "text-bamboo font-medium"
                         : "text-ink-ghost hover:text-ink-faint"
@@ -1019,7 +1019,7 @@ export function NotePad({
                   </button>
                   <button
                     onClick={() => setMode("open")}
-                    className={`relative px-3.5 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
+                    className={`relative px-2 py-1.5 text-[13px] rounded-t-lg transition-all duration-200 cursor-pointer ${
                       mode === "open"
                         ? "text-bamboo font-medium"
                         : "text-ink-ghost hover:text-ink-faint"
@@ -1035,11 +1035,17 @@ export function NotePad({
 
               <div className="ml-auto flex items-center gap-1.5">
                 <button
-                  className="pad-tool"
+                  className="pad-tool shrink-0 whitespace-nowrap"
                   onClick={() => (surfaceMode === "edge" ? void detachEdge() : void attachEdge())}
                   title={surfaceMode === "edge" ? "解除吸附" : "吸附到右侧"}
                 >
-                  {surfaceMode === "edge" ? "解除吸附" : "⇥ 右侧吸附"}
+                  {surfaceMode === "edge" ? (
+                    "解除吸附"
+                  ) : (
+                    <>
+                      ⇥ <span className="dock-action-label">右侧吸附</span>
+                    </>
+                  )}
                 </button>
                 <button
                   hidden={surfaceMode === "edge"}

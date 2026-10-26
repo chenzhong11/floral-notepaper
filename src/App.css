@@ -811,6 +811,14 @@ input::placeholder {
 .pad-tool:hover {
   background: #78936d18;
 }
+.dock-action-label {
+  display: none;
+}
+@media (min-width: 300px) {
+  .dock-action-label {
+    display: inline;
+  }
+}
 .draft-conflict {
   padding: 8px 12px;
   font-size: 12px;
