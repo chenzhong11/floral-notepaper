@@ -1805,15 +1805,23 @@ mod tests {
 
     #[test]
     fn concurrent_note_readers_do_not_race_config_temp_files() {
-        let store=std::sync::Arc::new(test_store("concurrent_readers"));
+        let store = std::sync::Arc::new(test_store("concurrent_readers"));
         store.list_notes().unwrap();
-        let threads: Vec<_>=(0..8).map(|_| {
-            let store=store.clone();
-            std::thread::spawn(move || {
-                for _ in 0..30 { store.list_notes().expect("parallel config/note reads must not rename each other's temp files"); }
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..30 {
+                        store.list_notes().expect(
+                            "parallel config/note reads must not rename each other's temp files",
+                        );
+                    }
+                })
             })
-        }).collect();
-        for thread in threads { thread.join().expect("reader thread"); }
+            .collect();
+        for thread in threads {
+            thread.join().expect("reader thread");
+        }
     }
 
     #[test]
