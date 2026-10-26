@@ -960,6 +960,7 @@ export function NotePad({
         <Tile
           title={tileTitle || undefined}
           content={content}
+          onContentChange={changePreview}
           color={tileColor}
           fontSize={surfaceFontSize}
           renderMarkdown={tileRenderMarkdown}
