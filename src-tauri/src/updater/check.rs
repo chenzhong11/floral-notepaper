@@ -24,6 +24,9 @@ const MIRROR_CHYAN_MANIFEST_PATH_ENV: &str = "FLORAL_NOTEPAPER_UPDATE_MIRROR_MAN
 const GITHUB_MANIFEST_PATH_ENV: &str = "FLORAL_NOTEPAPER_UPDATE_GITHUB_MANIFEST_PATH";
 const GITHUB_REPO_ENV: &str = "FLORAL_NOTEPAPER_UPDATE_GITHUB_REPO";
 const DEFAULT_GITHUB_REPO: &str = "Achilng/floral-notepaper";
+// Official releases are compared with the upstream version this fork includes,
+// not the independently numbered personal build. Update on each upstream merge.
+const PERSONAL_UPSTREAM_BASELINE: &str = "1.2.0";
 const MIRROR_CHYAN_API_BASE: &str = "https://mirrorchyan.com/api/resources";
 const MIRROR_CHYAN_RES_ID: &str = "floral";
 const MIRROR_CHYAN_RES_ID_OVERRIDE_ENV: &str = "FLORAL_NOTEPAPER_MIRROR_CHYAN_RES_ID";
@@ -229,6 +232,7 @@ pub(crate) struct UpdateCheckService {
     mirror_chyan: MirrorChyanProvider,
     github: GithubProvider,
     platform_override: Option<PlatformInfo>,
+    comparison_version: Option<&'static str>,
 }
 
 impl UpdateCheckService {
@@ -237,6 +241,7 @@ impl UpdateCheckService {
             mirror_chyan: MirrorChyanProvider::from_env(),
             github: GithubProvider::from_env(),
             platform_override: None,
+            comparison_version: Some(PERSONAL_UPSTREAM_BASELINE),
         }
     }
 
@@ -261,7 +266,7 @@ impl UpdateCheckService {
         let previous_state = state::load_with_current_version(paths, current_version)?;
         let context = UpdateCheckContext {
             platform: self.current_platform(current_version),
-            current_version: version::normalize_version(current_version)?,
+            current_version: version::normalize_version(self.comparison_version.unwrap_or(current_version))?,
             allow_prerelease: version::allows_prerelease(
                 &settings.channel,
                 settings.allow_prerelease,
@@ -282,7 +287,9 @@ impl UpdateCheckService {
 
         let outcome = self.evaluate(&settings, &context);
         match outcome {
-            Ok((result, next_state)) => {
+            Ok((mut result, mut next_state)) => {
+                result.current_version = current_version.to_string();
+                next_state.current_version = current_version.to_string();
                 debug_log!(
                     "检查完成 status={:?} latest_version={:?}",
                     result.status,
@@ -307,6 +314,7 @@ impl UpdateCheckService {
             mirror_chyan,
             github,
             platform_override: None,
+            comparison_version: None,
         }
     }
 
@@ -320,6 +328,7 @@ impl UpdateCheckService {
             mirror_chyan,
             github,
             platform_override: Some(platform),
+            comparison_version: None,
         }
     }
 
@@ -1255,6 +1264,22 @@ mod tests {
             channel: super::super::types::UpdateChannel::Stable,
             ..StoredUpdateSettings::default()
         }
+    }
+
+    #[test]
+    fn compares_official_release_against_upstream_baseline_not_personal_version() {
+        let paths = test_paths("personal-upstream-baseline");
+        let github_manifest = write_manifest(&paths, "github.json", "1.2.1");
+        let mut service = UpdateCheckService::with_providers_and_platform(
+            MirrorChyanProvider::offline(),
+            GithubProvider::with_manifest_path(github_manifest),
+            test_platform(Os::Macos, Arch::Aarch64, InstallKind::MacosAppBundle),
+        );
+        service.comparison_version = Some(PERSONAL_UPSTREAM_BASELINE);
+        let result = service.run(&paths, true, "1.2.1").expect("check official release");
+        assert_eq!(result.status, UpdateCheckStatus::Available);
+        assert_eq!(result.latest_version.as_deref(), Some("1.2.1"));
+        assert_eq!(result.current_version, "1.2.1");
     }
 
     fn write_manifest(paths: &UpdatePaths, name: &str, version: &str) -> PathBuf {

@@ -60,8 +60,9 @@ describe("UpdateSettingsSection", () => {
     expect(markup).toContain("更新");
     expect(markup).toContain("当前版本：1.0.4");
     expect(markup).toContain("检查更新");
-    expect(markup).toContain("待更新版本：1.0.5");
-    expect(markup).toContain("下载更新");
+    expect(markup).toContain("官方新版本：1.0.5");
+    expect(markup).not.toContain("下载更新");
+    expect(markup).toContain("查看定制版发布页面");
     expect(markup).not.toContain("自动检查更新");
     expect(markup).not.toContain("Mirror酱");
   });
@@ -77,7 +78,7 @@ describe("UpdateSettingsSection", () => {
 
     expect(markup).toContain("更新设置");
     expect(markup).toContain("自动检查更新");
-    expect(markup).toContain("有新版本时自动下载");
+    expect(markup).not.toContain("有新版本时自动下载");
     expect(markup).toContain("下载源");
     expect(markup).toContain("GitHub");
     expect(markup).toContain("Mirror酱");
@@ -119,9 +120,9 @@ describe("UpdateSettingsSection", () => {
       />,
     );
 
-    expect(markup).toContain("正在准备退出应用并安装更新");
+    expect(markup).not.toContain("正在准备退出应用并安装更新");
     expect(markup).not.toContain("dry-run 校验");
-    expect(markup).toContain("/tmp/install-1.0.5.log");
+    expect(markup).not.toContain("安装并重启");
   });
 
   test("shows re-download instead of install when the last error requires a fresh asset", () => {
@@ -146,7 +147,7 @@ describe("UpdateSettingsSection", () => {
       />,
     );
 
-    expect(markup).toContain("下载更新");
+    expect(markup).not.toContain("下载更新");
     expect(markup).not.toContain("安装并重启");
     expect(markup).not.toContain("重新尝试安装");
   });
@@ -175,7 +176,7 @@ describe("UpdateSettingsSection", () => {
     );
 
     expect(markup).toContain("安装后重新打开的仍是旧版本，请直接重试安装");
-    expect(markup).toContain("/tmp/install-1.0.5.log");
+    expect(markup).not.toContain("安装并重启");
   });
 
   test("shows a loading placeholder before the update status has been hydrated", () => {

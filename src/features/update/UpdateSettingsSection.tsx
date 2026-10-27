@@ -276,6 +276,8 @@ export function UpdateSettingsSection({
   }, []);
 
   const currentVersion = status?.currentVersion ?? "--";
+  // Personal releases are deliberately installed manually after validation.
+  const personalUpdatesAreManual: boolean = true;
   const storeManaged = status?.installKind === "windowsMsix";
   const showCheckControls = mode !== "settingsOnly";
   const showSettingsControls = mode !== "checkOnly";
@@ -583,7 +585,15 @@ export function UpdateSettingsSection({
             </button>
           </div>
 
-          {renderDownloadCard({
+          <p className="text-[11px] text-ink-faint leading-relaxed">
+            这里只检查官方新版本；定制功能需要先适配并验收，官方更新不会直接安装。
+          </p>
+          {status.latestVersion && <p className="text-[11px] text-ink-faint">官方新版本：{status.latestVersion}</p>}
+          <button type="button" className="text-[11px] text-bamboo underline cursor-pointer"
+            onClick={() => void openUrl("https://github.com/chenzhong11/floral-notepaper/releases")}>
+            查看定制版发布页面
+          </button>
+          {!personalUpdatesAreManual && renderDownloadCard({
             t,
             status,
             source: currentSource,
@@ -624,14 +634,6 @@ export function UpdateSettingsSection({
                 checked={settings.autoCheck}
                 disabled={controlsDisabled}
                 onChange={(checked) => updateSettings("autoCheck", checked)}
-              />
-              <UpdateToggleRow
-                label={t("settings.update.autoDownload", {
-                  defaultValue: "有新版本时自动下载",
-                })}
-                checked={settings.autoDownload}
-                disabled={controlsDisabled}
-                onChange={(checked) => updateSettings("autoDownload", checked)}
               />
             </div>
 

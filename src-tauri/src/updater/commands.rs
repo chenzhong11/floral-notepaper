@@ -135,6 +135,7 @@ pub async fn update_download(
     state: State<'_, UpdaterState>,
     source: Option<String>,
 ) -> Result<UpdateDownloadResult, AppError> {
+    personal_update_guard()?;
     let source = source.as_deref().map(parse_download_source).transpose()?;
     let task = state.begin_task(UpdateTaskKind::Download)?;
     let cancel_flag = task
@@ -197,6 +198,7 @@ pub async fn update_install(
     app: tauri::AppHandle,
     state: State<'_, UpdaterState>,
 ) -> Result<UpdateInstallResult, AppError> {
+    personal_update_guard()?;
     let task = state.begin_task(UpdateTaskKind::Install)?;
     let request_id = begin_install_prepare(&app, &state);
     if let Err(error) = wait_for_install_prepare(&app, &state, &request_id).await {
@@ -265,6 +267,15 @@ pub async fn update_install(
             Err(error)
         }
     }
+}
+
+// Official releases do not contain the personal features. Old persisted update
+// state can also refer to an official installer, so guard both entry points.
+fn personal_update_guard() -> Result<(), AppError> {
+    Err(errors::app_error(
+        "personalUpdateManualOnly",
+        "定制版不会安装官方更新，请从定制版发布页面获取经验证的更新。",
+    ))
 }
 
 #[tauri::command]
@@ -615,6 +626,11 @@ mod tests {
     use super::super::version::CURRENT_APP_VERSION;
     use super::*;
     use std::{fs, sync::Mutex};
+
+    #[test]
+    fn personal_update_guard_rejects_installs_from_old_persisted_state() {
+        assert_eq!(personal_update_guard().unwrap_err().code, "personalUpdateManualOnly");
+    }
 
     #[derive(Default)]
     struct FakeEmitter {
