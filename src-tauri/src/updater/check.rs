@@ -266,7 +266,9 @@ impl UpdateCheckService {
         let previous_state = state::load_with_current_version(paths, current_version)?;
         let context = UpdateCheckContext {
             platform: self.current_platform(current_version),
-            current_version: version::normalize_version(self.comparison_version.unwrap_or(current_version))?,
+            current_version: version::normalize_version(
+                self.comparison_version.unwrap_or(current_version),
+            )?,
             allow_prerelease: version::allows_prerelease(
                 &settings.channel,
                 settings.allow_prerelease,
@@ -1276,7 +1278,9 @@ mod tests {
             test_platform(Os::Macos, Arch::Aarch64, InstallKind::MacosAppBundle),
         );
         service.comparison_version = Some(PERSONAL_UPSTREAM_BASELINE);
-        let result = service.run(&paths, true, "1.2.1").expect("check official release");
+        let result = service
+            .run(&paths, true, "1.2.1")
+            .expect("check official release");
         assert_eq!(result.status, UpdateCheckStatus::Available);
         assert_eq!(result.latest_version.as_deref(), Some("1.2.1"));
         assert_eq!(result.current_version, "1.2.1");

@@ -629,7 +629,10 @@ mod tests {
 
     #[test]
     fn personal_update_guard_rejects_installs_from_old_persisted_state() {
-        assert_eq!(personal_update_guard().unwrap_err().code, "personalUpdateManualOnly");
+        assert_eq!(
+            personal_update_guard().unwrap_err().code,
+            "personalUpdateManualOnly"
+        );
     }
 
     #[derive(Default)]
