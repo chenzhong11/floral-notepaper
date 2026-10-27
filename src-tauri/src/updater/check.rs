@@ -282,9 +282,13 @@ impl UpdateCheckService {
             context.platform.install_kind
         );
         if let Err(error) = context.platform.ensure_in_app_updates_supported() {
-            persist_last_auto_check_at(paths, &settings)?;
-            state::save(paths, &failed_state(&context, &settings, &error))?;
-            return Err(error);
+            // Checking is informational in the personal build. Portable builds
+            // cannot install in-app, but can still check for upstream releases.
+            if error.code != "updatePortableManualOnly" {
+                persist_last_auto_check_at(paths, &settings)?;
+                state::save(paths, &failed_state(&context, &settings, &error))?;
+                return Err(error);
+            }
         }
 
         let outcome = self.evaluate(&settings, &context);
@@ -1275,7 +1279,7 @@ mod tests {
         let mut service = UpdateCheckService::with_providers_and_platform(
             MirrorChyanProvider::offline(),
             GithubProvider::with_manifest_path(github_manifest),
-            test_platform(Os::Macos, Arch::Aarch64, InstallKind::MacosAppBundle),
+            test_platform(Os::Windows, Arch::X86_64, InstallKind::WindowsPortable),
         );
         service.comparison_version = Some(PERSONAL_UPSTREAM_BASELINE);
         let result = service
@@ -1512,31 +1516,6 @@ mod tests {
             .expect_err("unknown install kind should be rejected");
 
         assert_eq!(error.code, "updatePlatformUnsupported");
-        let saved_state = state::load(&paths).expect("load failed state");
-        assert_eq!(saved_state.status, UpdateStatus::Failed);
-        assert_eq!(
-            saved_state
-                .last_error
-                .as_ref()
-                .and_then(|error| error.action.as_deref()),
-            Some("useSupportedInstall")
-        );
-    }
-
-    #[test]
-    fn run_rejects_windows_portable_install_kind() {
-        let paths = test_paths("check-run-portable-platform");
-        let service = UpdateCheckService::with_providers_and_platform(
-            MirrorChyanProvider::offline(),
-            GithubProvider::offline(),
-            test_platform(Os::Windows, Arch::X86_64, InstallKind::WindowsPortable),
-        );
-
-        let error = service
-            .run(&paths, true, "1.0.3")
-            .expect_err("portable install kind should be rejected");
-
-        assert_eq!(error.code, "updatePortableManualOnly");
         let saved_state = state::load(&paths).expect("load failed state");
         assert_eq!(saved_state.status, UpdateStatus::Failed);
         assert_eq!(
